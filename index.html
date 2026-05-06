@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>电商设计台</title>
+  <link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ============ 顶部导航 ============ -->
+    <header class="top-bar">
+      <div class="top-bar-left">
+        <span class="logo">🎨</span>
+        <h1>电商设计台</h1>
+      </div>
+      <div class="top-bar-right">
+        <button class="btn-icon" @click="showSettings = true" title="API设置">⚙️</button>
+      </div>
+    </header>
+
+    <!-- ============ 三栏主体 ============ -->
+    <div class="app-body">
+
+      <!-- ======== 左栏：会话列表 ======== -->
+      <aside class="panel-left">
+        <div class="panel-left-header">
+          <span>💬 会话</span>
+          <button class="btn-new-session" @click="createSession" title="新建会话">＋</button>
+        </div>
+        <div class="session-list">
+          <div v-if="sessions.length === 0" class="session-empty">
+            暂无会话，点击 ＋ 新建
+          </div>
+          <div
+            v-for="session in sessionsSorted"
+            :key="session.id"
+            class="session-item"
+            :class="{ active: activeSessionId === session.id }"
+            @click="selectSession(session.id)"
+          >
+            <div class="session-info">
+              <span class="session-name">{{ session.name }}</span>
+              <span class="session-step">Step {{ (session.currentStep || 0) + 1 }}/6</span>
+            </div>
+            <button class="btn-delete-session" @click.stop="deleteSession(session.id)" title="删除会话">✕</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ======== 中栏：任务窗口 ======== -->
+      <main class="panel-center">
+
+        <!-- 空状态：未选中会话 -->
+        <div v-if="!activeSession" class="center-empty">
+          <div class="empty-icon">✨</div>
+          <h2>电商设计台</h2>
+          <p>选择一个会话或新建会话开始</p>
+          <button class="btn-primary" @click="createSession">＋ 新建会话</button>
+        </div>
+
+        <!-- 有会话时的聊天窗口 -->
+        <template v-else>
+
+          <!-- 步骤进度条 -->
+          <div class="step-progress">
+            <div
+              v-for="(step, i) in steps"
+              :key="i"
+              class="step-node"
+              :class="{
+                active: activeSession.currentStep === i,
+                done: (activeSession.completedSteps || []).includes(i),
+                clickable: canAccessStep(i)
+              }"
+              @click="goToStep(i)"
+              :title="step.label"
+            >
+              <div class="step-dot">
+                <span v-if="(activeSession.completedSteps || []).includes(i)">✓</span>
+                <span v-else>{{ i + 1 }}</span>
+              </div>
+              <div class="step-label">{{ step.label }}</div>
+            </div>
+            <div class="step-line-track">
+              <div class="step-line-fill" :style="{ width: stepProgressPercent + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- 消息区域 -->
+          <div class="chat-messages" ref="chatMessages">
+
+            <div v-for="(msg, mi) in activeSession.messages" :key="mi"
+                 class="msg" :class="[msg.role, msg.type]">
+
+              <!-- 普通文本消息 -->
+              <div v-if="msg.type === 'text'" class="bubble">
+                <div class="bubble-content" v-html="formatMarkdown(msg.content)"></div>
+              </div>
+
+              <!-- 产品信息表单（Step 1） -->
+              <div v-if="msg.type === 'form-input'" class="bubble bubble-form">
+                <div class="form-card">
+                  <h3>📋 填写产品信息</h3>
+                  <div class="form-grid-chat">
+                    <div class="fg">
+                      <label>产品图片</label>
+                      <div class="upload-mini" @dragover.prevent @drop.prevent="handleDrop" @click="triggerUpload">
+                        <input type="file" ref="fileInput" @change="handleFileSelect" accept="image/*" hidden>
+                        <img v-if="activeSession.stepData.productImage" :src="activeSession.stepData.productImage" class="upload-thumb">
+                        <span v-else class="upload-placeholder-mini">📷 点击上传</span>
+                      </div>
+                    </div>
+                    <div class="fg">
+                      <label>目标平台 *</label>
+                      <select v-model="activeSession.stepData.formData.platform">
+                        <option value="">请选择</option>
+                        <option value="taobao">淘宝</option>
+                        <option value="tmall">天猫</option>
+                        <option value="jd">京东</option>
+                        <option value="pdd">拼多多</option>
+                        <option value="douyin">抖音</option>
+                        <option value="xiaohongshu">小红书</option>
+                        <option value="1688">1688</option>
+                        <option value="amazon">亚马逊</option>
+                      </select>
+                    </div>
+                    <div class="fg">
+                      <label>图片类型 *</label>
+                      <select v-model="activeSession.stepData.formData.imageType">
+                        <option value="">请选择</option>
+                        <option value="main">主图</option>
+                        <option value="detail">详情页</option>
+                        <option value="both">主图+详情页</option>
+                      </select>
+                    </div>
+                    <div class="fg">
+                      <label>产品名称 *</label>
+                      <input type="text" v-model="activeSession.stepData.formData.productName" placeholder="如：XX牌蓝牙耳机">
+                    </div>
+                    <div class="fg">
+                      <label>产品类目 *</label>
+                      <input type="text" v-model="activeSession.stepData.formData.category" placeholder="如：数码配件">
+                    </div>
+                    <div class="fg">
+                      <label>核心参数 *</label>
+                      <input type="text" v-model="activeSession.stepData.formData.specs" placeholder="如：蓝牙5.3、续航40小时">
+                    </div>
+                    <div class="fg full">
+                      <label>核心卖点 *</label>
+                      <textarea v-model="activeSession.stepData.formData.sellingPoints" rows="2" placeholder="如：超长续航、主动降噪、IPX5防水"></textarea>
+                    </div>
+                    <div class="fg">
+                      <label>目标人群 *</label>
+                      <input type="text" v-model="activeSession.stepData.formData.targetAudience" placeholder="如：运动爱好者">
+                    </div>
+                    <div class="fg">
+                      <label>使用场景 *</label>
+                      <input type="text" v-model="activeSession.stepData.formData.usageScene" placeholder="如：跑步、通勤">
+                    </div>
+                    <div class="fg">
+                      <label>价格带 *</label>
+                      <input type="text" v-model="activeSession.stepData.formData.priceRange" placeholder="如：99-199元">
+                    </div>
+                    <div class="fg">
+                      <label>品牌名</label>
+                      <input type="text" v-model="activeSession.stepData.formData.brandName" placeholder="可选">
+                    </div>
+                    <div class="fg full">
+                      <label>品牌元素</label>
+                      <input type="text" v-model="activeSession.stepData.formData.brandElements" placeholder="如：logo颜色、品牌调性">
+                    </div>
+                    <div class="fg full">
+                      <label>避忌内容</label>
+                      <input type="text" v-model="activeSession.stepData.formData.avoidContent" placeholder="如：不要出现竞品logo">
+                    </div>
+                    <div class="fg">
+                      <label>产品版本</label>
+                      <input type="text" v-model="activeSession.stepData.formData.productVersion" placeholder="可选">
+                    </div>
+                    <div class="fg full">
+                      <label>视觉备注</label>
+                      <textarea v-model="activeSession.stepData.formData.visualNotes" rows="2" placeholder="如：希望用暖色调、科技感"></textarea>
+                    </div>
+                  </div>
+                  <button class="btn-primary btn-submit-form" :disabled="!isFormValid" @click="submitStep1">
+                    提交，开始AI分析 →
+                  </button>
+                </div>
+              </div>
+
+              <!-- 加载中消息 -->
+              <div v-if="msg.type === 'loading'" class="bubble bubble-loading">
+                <div class="typing-indicator">
+                  <span></span><span></span><span></span>
+                </div>
+                <span class="loading-text">{{ msg.content }}</span>
+              </div>
+
+              <!-- 步骤产物卡片 -->
+              <div v-if="msg.type === 'card'" class="bubble bubble-card">
+                <div class="artifact-card" @click="openArtifact(msg)">
+                  <div class="card-icon">{{ steps[msg.stepIndex]?.icon }}</div>
+                  <div class="card-body">
+                    <div class="card-title">{{ msg.title }}</div>
+                    <div class="card-preview">{{ getPreview(msg.content) }}</div>
+                  </div>
+                  <div class="card-arrow">→</div>
+                </div>
+              </div>
+
+              <!-- 单张提示词卡片（Step 6 拆分后） -->
+              <div v-if="msg.type === 'prompt-card'" class="bubble bubble-prompt-card">
+                <div class="prompt-card">
+                  <div class="prompt-card-header">
+                    <span class="prompt-card-label">{{ msg.cardLabel }}</span>
+                    <span class="prompt-card-meta" v-if="msg.cardMeta">{{ msg.cardMeta }}</span>
+                  </div>
+                  <div class="prompt-card-body">
+                    <div class="prompt-card-left">
+                      <textarea
+                        class="prompt-card-textarea"
+                        :value="msg.content"
+                        @input="updatePromptCardText(mi, $event.target.value)"
+                        rows="6"
+                      ></textarea>
+                      <div class="prompt-card-actions">
+                        <button class="btn-secondary btn-sm" @click="copyPromptCard(mi)">📋 复制</button>
+                        <button class="btn-primary btn-sm" @click="generateImageFromCard(mi)" :disabled="msg.generating">
+                          <span v-if="msg.generating">⏳ 生成中...</span>
+                          <span v-else>🎨 生成图片</span>
+                        </button>
+                      </div>
+                      <div v-if="msg.genError" class="prompt-card-error">
+                        ❌ {{ msg.genError }}
+                      </div>
+                    </div>
+                    <div v-if="msg.imageUrl" class="prompt-card-right">
+                      <img :src="msg.imageUrl" alt="生成结果" class="prompt-card-image">
+                      <div class="prompt-card-result-actions">
+                        <a :href="msg.imageUrl" :download="msg.cardLabel + '.png'" class="btn-secondary btn-sm">⬇️ 下载</a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 竞品研究模式选择 -->
+              <div v-if="msg.type === 'research-choice'" class="bubble bubble-choice">
+                <p>{{ msg.content }}</p>
+                <div class="choice-buttons">
+                  <button class="btn-choice" @click="startAutoResearch" :disabled="!searchConfigured">
+                    🔍 自动搜索研究
+                    <small v-if="!searchConfigured">（需先配置Tavily搜索）</small>
+                  </button>
+                  <button class="btn-choice" @click="startManualResearch">
+                    ✍️ 手动输入竞品信息
+                  </button>
+                </div>
+              </div>
+
+              <!-- 手动输入竞品信息 -->
+              <div v-if="msg.type === 'manual-input'" class="bubble bubble-form">
+                <div class="form-card">
+                  <h3>✍️ 手动输入竞品信息</h3>
+                  <textarea v-model="manualCompetitorInfo" rows="6"
+                    placeholder="请粘贴或输入竞品信息，包括竞品名称、价格、主图风格、详情页结构等..."></textarea>
+                  <button class="btn-primary btn-submit-form" @click="submitManualResearch" :disabled="!manualCompetitorInfo.trim()">
+                    提交竞品信息 →
+                  </button>
+                </div>
+              </div>
+
+              <!-- 变量确认 -->
+              <div v-if="msg.type === 'variable-confirm'" class="bubble bubble-form">
+                <div class="form-card">
+                  <h3>🎯 确认创意变量</h3>
+                  <p class="form-hint">AI已推荐以下变量，你可以调整后确认：</p>
+                  <div class="form-grid-chat">
+                    <div class="fg">
+                      <label>视觉风格</label>
+                      <input type="text" v-model="activeSession.stepData.creativeConfirmation.style">
+                    </div>
+                    <div class="fg">
+                      <label>主图张数</label>
+                      <input type="text" v-model="activeSession.stepData.creativeConfirmation.mainImageCount">
+                    </div>
+                    <div class="fg">
+                      <label>详情页屏数</label>
+                      <input type="text" v-model="activeSession.stepData.creativeConfirmation.detailScreenCount">
+                    </div>
+                    <div class="fg">
+                      <label>内容节奏</label>
+                      <input type="text" v-model="activeSession.stepData.creativeConfirmation.contentRhythm">
+                    </div>
+                  </div>
+                  <button class="btn-primary btn-submit-form" @click="confirmVariables">
+                    确认变量，继续 →
+                  </button>
+                </div>
+              </div>
+
+              <!-- 用户消息 -->
+              <div v-if="msg.role === 'user' && msg.type === 'user'" class="bubble bubble-user">
+                <div class="bubble-content">{{ msg.content }}</div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- 底部输入框 -->
+          <div class="chat-input-bar">
+            <textarea
+              ref="chatInput"
+              v-model="userInput"
+              @keydown.enter.exact.prevent="sendUserMessage"
+              @input="autoResize"
+              placeholder="输入消息与AI交流... (Enter 发送)"
+              rows="1"
+            ></textarea>
+            <button class="btn-send" @click="sendUserMessage" :disabled="!userInput.trim() || isProcessing">
+              <span v-if="isProcessing">⏳</span>
+              <span v-else>↑</span>
+            </button>
+          </div>
+
+        </template>
+      </main>
+
+      <!-- ======== 右栏：产物面板 ======== -->
+      <aside class="panel-right" :class="{ open: !!activeArtifact }">
+        <template v-if="activeArtifact">
+          <div class="panel-right-header">
+            <span>{{ activeArtifact.title }}</span>
+            <button class="btn-icon-sm" @click="closeArtifact">✕</button>
+          </div>
+          <div class="panel-right-body">
+            <div v-if="activeArtifact.editable" class="artifact-edit">
+              <textarea v-model="activeArtifact.content" class="artifact-textarea"></textarea>
+              <div class="artifact-actions">
+                <button class="btn-secondary" @click="copyArtifactContent">📋 复制</button>
+                <button class="btn-primary btn-sm" @click="saveArtifactEdit">💾 保存修改</button>
+              </div>
+            </div>
+            <div v-else class="artifact-view">
+              <div class="artifact-md" v-html="formatMarkdown(activeArtifact.content)"></div>
+              <div class="artifact-actions">
+                <button class="btn-secondary" @click="copyArtifactContent">📋 复制</button>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div v-else class="panel-right-empty">
+          <span>👈 点击左侧卡片查看产物</span>
+        </div>
+      </aside>
+
+    </div>
+
+    <!-- ============ 设置模态框 ============ -->
+    <div v-if="showSettings" class="modal-overlay" @click.self="showSettings = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>⚙️ API 设置</h2>
+          <button class="btn-icon-sm" @click="showSettings = false">✕</button>
+        </div>
+        <div class="modal-body">
+
+          <!-- 文本LLM设置 -->
+          <section class="setting-section">
+            <h3>📝 文本 LLM</h3>
+            <div class="form-grid-chat">
+              <div class="fg">
+                <label>供应商预设</label>
+                <select v-model="settings.llm.provider" @change="applyProviderPreset">
+                  <option value="custom">自定义</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="siliconflow">SiliconFlow</option>
+                  <option value="qwen">通义千问</option>
+                </select>
+              </div>
+              <div class="fg">
+                <label>API模式</label>
+                <select v-model="settings.llm.apiMode">
+                  <option value="chat-completions">Chat Completions</option>
+                  <option value="responses">Responses</option>
+                  <option value="claude">Claude Messages</option>
+                </select>
+              </div>
+              <div class="fg full">
+                <label>Base URL</label>
+                <input type="text" v-model="settings.llm.baseUrl" placeholder="https://api.openai.com/v1">
+              </div>
+              <div class="fg full">
+                <label>API Key</label>
+                <input type="password" v-model="settings.llm.apiKey" placeholder="sk-...">
+              </div>
+              <div class="fg full">
+                <label>模型名称</label>
+                <input type="text" v-model="settings.llm.model" placeholder="gpt-4o">
+              </div>
+            </div>
+            <button class="btn-secondary" @click="testLLMConnection">🔌 测试连接</button>
+          </section>
+
+          <!-- 图片LLM设置 -->
+          <section class="setting-section">
+            <h3>🖼️ 图片 LLM</h3>
+            <div class="form-grid-chat">
+              <div class="fg full">
+                <label>API 模式</label>
+                <select v-model="settings.image.apiMode">
+                  <option value="images">Images API (/v1/images)</option>
+                  <option value="responses">Responses API (/v1/responses)</option>
+                </select>
+              </div>
+              <div class="fg full">
+                <label>Base URL</label>
+                <input type="text" v-model="settings.image.baseUrl" placeholder="https://api.openai.com/v1">
+              </div>
+              <div class="fg full">
+                <label>API Key</label>
+                <input type="password" v-model="settings.image.apiKey" placeholder="sk-...">
+              </div>
+              <div class="fg full" v-if="settings.image.apiMode === 'images'">
+                <label>图片模型</label>
+                <input type="text" v-model="settings.image.model" placeholder="gpt-image-2">
+              </div>
+              <div class="fg full" v-if="settings.image.apiMode === 'responses'">
+                <label>模型名称 <small style="color:var(--text-muted)">（需支持图片生成）</small></label>
+                <input type="text" v-model="settings.image.model" placeholder="gpt-5.5">
+              </div>
+            </div>
+            <button class="btn-secondary" @click="testImageConnection">🔌 测试连接</button>
+          </section>
+
+          <!-- Tavily搜索设置 -->
+          <section class="setting-section">
+            <h3>🔍 联网搜索 (Tavily)</h3>
+            <div class="form-grid-chat">
+              <div class="fg">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="settings.search.enabled">
+                  启用自动搜索
+                </label>
+              </div>
+              <div class="fg full">
+                <label>Tavily API Key</label>
+                <input type="password" v-model="settings.search.apiKey" placeholder="tvly-...">
+              </div>
+            </div>
+          </section>
+
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="showSettings = false">取消</button>
+          <button class="btn-primary" @click="saveSettings">💾 保存</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 脚本加载 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="src/api.js"></script>
+  <script src="src/prompts/step2-competitor.js"></script>
+  <script src="src/prompts/step3-variable.js"></script>
+  <script src="src/prompts/step4-strategy.js"></script>
+  <script src="src/prompts/step6-prompts.js"></script>
+  <script src="src/tables/platform-sizes.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
