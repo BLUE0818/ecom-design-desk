@@ -1,3 +1,5 @@
+
+
 # 电商设计台
 
 基于AI驱动的电商主图与详情页一键生成工具，帮助电商卖家快速生成专业的AI图片提示词。
@@ -34,8 +36,8 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-username/ecom-prompt-gen.git
-cd ecom-prompt-gen
+git clone https://github.com/BLUE0818/ecom-design-desk.git
+cd ecom-design-desk
 
 # 2. 安装依赖
 npm install
